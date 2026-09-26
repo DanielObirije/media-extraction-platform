@@ -15,6 +15,7 @@
     "@aws-sdk/client-sqs": "^3.1141.0",
     "@aws-sdk/lib-dynamodb": "^3.1141.0",
     "dotenv": "^18.0.4",
-    "express": "^5.2.1"
+    "express": "^5.2.1",
+    "serpapi": "^2.2.1"
   }
 }

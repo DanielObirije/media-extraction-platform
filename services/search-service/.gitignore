@@ -1,7 +1,6 @@
-# Dependencies
-node_modules/
-
-# Environment / secrets
+node_modules
 .env
-.env.*
-!.env.example
+.git
+.gitignore
+Dockerfile
+npm-debug.log

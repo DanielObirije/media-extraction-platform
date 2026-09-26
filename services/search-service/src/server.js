@@ -24,7 +24,7 @@ const app = express();
 const PORT = 3000;
 
 app.use(express.json());
-app.use(express.static(path.join(__dirname, "public")));
+app.use(express.static(path.join(__dirname,"..", "public")));
 
 app.get("/health", (req, res) => {
   res.json({ status: "ok" });
@@ -104,7 +104,6 @@ app.post("api/dowload", async (req, res) => {
       jobId,
       status: "QUEUED",
     });
-
   } catch (error) {
     console.error("Failed to create download job:", error);
     res.status(500).json({
