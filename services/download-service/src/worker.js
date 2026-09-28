@@ -2,7 +2,6 @@ const path = require("path");
 const fs = require("fs");
 const os = require("os");
 const { execFile } = require("child_process");
-const { promisify } = require("util");
 
 const {
   SQSClient,
@@ -15,9 +14,6 @@ const { S3Client, PutObjectCommand } = require("@aws-sdk/client-s3");
 const AWS_REGION = process.env.AWS_REGION;
 const QUEUE_URL = process.env.QUEUE_URL;
 const S3_BUCKET = process.env.S3_BUCKET;
-
-const app = express();
-const PORT = 4000;
 
 const sqs = new SQSClient({
   AWS_REGION: AWS_REGION,
@@ -35,7 +31,7 @@ if (!fs.existsSync(DOWNLOADS_DIR)) {
 
 async function downloadVideo(url, jobId) {
   const outputTemplate = path.join(DOWNLOADS_DIR, `${jobId}.%(ext)s`);
-  await execFile(
+  execFile(
     "yt-dlp",
     [
       "-o",
@@ -56,32 +52,96 @@ async function downloadVideo(url, jobId) {
     throw new Error("Downloaded file was not found");
   }
   return path.join(DOWNLOADS_DIR, files[0]);
-
-  //   (error, stdout, stderr) => {
-  //     if (error) {
-  //       console.error("yt-dlp error:", stderr);
-
-  //       return res.status(500).json({
-  //         error: "Failed to download video",
-  //         details: stderr,
-  //       });
-  //     }
-
-  //     const files = fs.readdirSync(DOWNLOADS_DIR);
-
-  //     const downloaded = files.find((file) => file.startsWith(safeName));
-
-  //     if (!downloaded) {
-  //       return res.status(500).json({
-  //         error: "Download completed but file was not found",
-  //       });
-  //     }
-
-  //     res.json({
-  //       success: true,
-  //       filename: downloaded,
-  //       path: `/downloads/${downloaded}`,
-  //     });
-  //   },
-  // );
 }
+
+async function uploadToS3(filepath, jobId) {
+  const s3Key = `videos/${jobId}${extension}`;
+  const fileStream = fs.createReadStream(filepath);
+  await s3.PutObjectCommand(
+    new PutObjectCommand({
+      Bucket: S3_BUCKET,
+      key: s3Key,
+      body: fileStream,
+      contentType: "video/mp4",
+    }),
+  );
+  return s3Key;
+}
+
+async function processMessage(message) {
+  const job = JSON.parse(message.Body);
+
+  const { jobId, url } = job;
+
+  console.log(`Processing job: ${jobId}`);
+
+  let filePath;
+
+  try {
+    filePath = await downloadVideo(url, jobId);
+
+    console.log(`Downloaded job: ${jobId}`);
+
+    const s3Key = await uploadToS3(filePath, jobId);
+
+    console.log(`Uploaded job ${jobId} to s3://${S3_BUCKET}/${s3Key}`);
+
+    fs.unlinkSync(filePath);
+
+    console.log(`Deleted temporary file for job: ${jobId}`);
+
+    await sqs.send(
+      new DeleteMessageCommand({
+        QueueUrl: QUEUE_URL,
+        ReceiptHandle: message.ReceiptHandle,
+      }),
+    );
+
+    console.log(`Completed job: ${jobId}`);
+  } catch (error) {
+    console.error(`Job ${jobId} failed:`, error);
+
+    if (filePath && fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath);
+    }
+  }
+}
+
+async function pollQueue() {
+  console.log("Download worker started");
+  console.log("Waiting for download jobs...");
+
+  while (true) {
+    try {
+      const response = await sqs.send(
+        new ReceiveMessageCommand({
+          QueueUrl: QUEUE_URL,
+
+          MaxNumberOfMessages: 1,
+
+          // Long polling
+          WaitTimeSeconds: 20,
+
+          // Give the worker enough time to download/upload
+          VisibilityTimeout: 180,
+        }),
+      );
+
+      const messages = response.Messages || [];
+
+      for (const message of messages) {
+        await processMessage(message);
+      }
+    } catch (error) {
+      console.error("SQS polling error:", error);
+
+      // Prevent rapid retry if AWS temporarily fails
+      await new Promise((resolve) => setTimeout(resolve, 5000));
+    }
+  }
+}
+
+pollQueue().catch((error) => {
+  console.error("Worker crashed:", error);
+  process.exit(1);
+});
