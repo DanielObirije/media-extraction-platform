@@ -55,6 +55,7 @@ async function downloadVideo(url, jobId) {
 }
 
 async function uploadToS3(filepath, jobId) {
+  const extension = path.extname(filepath);
   const s3Key = `videos/${jobId}${extension}`;
   const fileStream = fs.createReadStream(filepath);
   await s3.PutObjectCommand(
@@ -118,6 +119,7 @@ async function pollQueue() {
           QueueUrl: QUEUE_URL,
 
           MaxNumberOfMessages: 1,
+          
 
           // Long polling
           WaitTimeSeconds: 20,
